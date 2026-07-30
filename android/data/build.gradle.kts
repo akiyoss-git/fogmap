@@ -35,6 +35,7 @@ dependencies {
     api(project(":core:routing"))
     implementation(libs.room.runtime)
     implementation(libs.room.ktx)
+    implementation(libs.sqlcipher)
     ksp(libs.room.compiler)
 
     implementation(libs.retrofit)

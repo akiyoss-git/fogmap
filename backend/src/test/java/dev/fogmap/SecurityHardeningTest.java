@@ -184,6 +184,56 @@ class SecurityHardeningTest {
     }
 
     @Test
+    @DisplayName("накрутка площади отбивается: залить континент одним запросом нельзя")
+    void impossibleGrowthIsRejected() {
+        User user = newUser();
+        byte[] full = new byte[TileMath.MASK_BYTES];
+        Arrays.fill(full, (byte) 0xFF);
+
+        // Полсотни тайлов, закрашенных целиком, — около 95 км² за один запрос от свежего аккаунта.
+        List<TileUpload> flood = new java.util.ArrayList<>();
+        for (int i = 0; i < 50; i++) {
+            flood.add(new TileUpload(8000 + i, 5122, full, null));
+        }
+
+        ResponseEntity<String> response = rest.exchange(
+                "/fog/sync",
+                HttpMethod.POST,
+                new HttpEntity<>(new SyncRequest(null, flood), bearer(user.tokens().accessToken())),
+                String.class);
+        assertEquals(HttpStatus.UNPROCESSABLE_ENTITY, response.getStatusCode());
+
+        // Транзакция откатилась целиком — в лидерборде по-прежнему ноль.
+        ResponseEntity<SyncResponse> after = rest.exchange(
+                "/fog/sync",
+                HttpMethod.POST,
+                new HttpEntity<>(new SyncRequest(null, List.of()), bearer(user.tokens().accessToken())),
+                SyncResponse.class);
+        assertNotNull(after.getBody());
+        assertEquals(0, after.getBody().areaM2());
+    }
+
+    @Test
+    @DisplayName("правдоподобный прирост проходит")
+    void plausibleGrowthIsAccepted() {
+        User user = newUser();
+        byte[] mask = new byte[TileMath.MASK_BYTES];
+        Arrays.fill(mask, 0, 64, (byte) 0xFF);
+
+        ResponseEntity<SyncResponse> response = rest.exchange(
+                "/fog/sync",
+                HttpMethod.POST,
+                new HttpEntity<>(
+                        new SyncRequest(null, List.of(new TileUpload(8500, 5122, mask, null))),
+                        bearer(user.tokens().accessToken())),
+                SyncResponse.class);
+
+        assertEquals(HttpStatus.OK, response.getStatusCode());
+        assertNotNull(response.getBody());
+        assertTrue(response.getBody().areaM2() > 0);
+    }
+
+    @Test
     @DisplayName("удаление аккаунта закрыто без токена")
     void deleteAccountRequiresAuth() {
         assertEquals(

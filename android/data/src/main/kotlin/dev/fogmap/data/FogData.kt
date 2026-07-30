@@ -3,6 +3,7 @@ package dev.fogmap.data
 import android.content.Context
 import dev.fogmap.data.api.AuthGuard
 import dev.fogmap.data.api.FogmapApi
+import dev.fogmap.data.api.HttpClient
 import dev.fogmap.data.api.SocialRepository
 import dev.fogmap.data.api.SyncRepository
 import dev.fogmap.data.api.TokenStore
@@ -22,6 +23,7 @@ class FogData(context: Context) {
 
     private val api: FogmapApi = Retrofit.Builder()
         .baseUrl(BASE_URL)
+        .client(HttpClient.build())
         .addConverterFactory(
             Json { ignoreUnknownKeys = true }.asConverterFactory("application/json".toMediaType()),
         )

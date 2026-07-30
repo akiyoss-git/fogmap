@@ -1,6 +1,20 @@
 plugins {
     java
     id("org.springframework.boot") version "3.5.16"
+    id("org.owasp.dependencycheck") version "10.0.3"
+}
+
+/**
+ * Проверка зависимостей на известные уязвимости: ./gradlew dependencyCheckAnalyze
+ *
+ * NVD с 2023 года требует ключ для вменяемой скорости выкачки: без него первая загрузка базы
+ * занимает часы и упирается в лимиты. Ключ берётся бесплатно на nvd.nist.gov и передаётся через
+ * переменную окружения NVD_API_KEY — в репозитории ему не место.
+ */
+dependencyCheck {
+    nvd.apiKey = System.getenv("NVD_API_KEY")
+    failBuildOnCVSS = 7.0f
+    suppressionFile = "config/dependency-check-suppressions.xml"
 }
 
 group = "dev.fogmap"

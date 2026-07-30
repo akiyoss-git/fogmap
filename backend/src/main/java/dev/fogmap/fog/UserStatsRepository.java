@@ -12,6 +12,20 @@ public class UserStatsRepository {
     public record StatsRow(long areaM2, int tilesCount) {
     }
 
+    /** Момент прошлой синхронизации; если её не было — момент создания аккаунта. */
+    public Instant lastChangeOrSignup(long userId) {
+        return jdbc.sql("""
+                        select coalesce(s.updated_at, u.created_at)
+                        from users u left join user_stats s on s.user_id = u.id
+                        where u.id = :userId
+                        """)
+                .param("userId", userId)
+                .query(java.sql.Timestamp.class)
+                .optional()
+                .map(java.sql.Timestamp::toInstant)
+                .orElse(Instant.EPOCH);
+    }
+
     private final JdbcClient jdbc;
 
     public UserStatsRepository(JdbcClient jdbc) {

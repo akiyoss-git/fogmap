@@ -35,6 +35,9 @@ public class FogService {
         }
 
         Instant now = Instant.now();
+        long areaBefore = stats.find(userId).map(UserStatsRepository.StatsRow::areaM2).orElse(0L);
+        Instant budgetSince = stats.lastChangeOrSignup(userId);
+
         for (TileUpload upload : request.tiles()) {
             validate(upload);
             byte[] existing = tiles.findMask(userId, upload.x(), upload.y()).orElse(null);
@@ -44,6 +47,17 @@ public class FogService {
         }
 
         long areaM2 = recomputeArea(userId);
+
+        long growth = areaM2 - areaBefore;
+        long allowed = GrowthBudget.allowedFor(budgetSince, now);
+        if (growth > allowed) {
+            // Транзакция откатится целиком: принимать «сколько поместилось» нельзя, иначе накрутка
+            // просто разбивается на пачки помельче.
+            throw new ResponseStatusException(
+                    HttpStatus.UNPROCESSABLE_ENTITY,
+                    "area growth " + growth + " exceeds what is physically possible since last sync");
+        }
+
         // Считаем от того, что вычислил сервер, а не от присланного клиентом.
         achievements.evaluate(userId, areaM2, tiles.findStats(userId).size());
 
