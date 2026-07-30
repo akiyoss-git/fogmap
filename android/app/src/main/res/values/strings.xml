@@ -10,6 +10,8 @@
     <string name="route_hint">Долгое нажатие — маршрут до точки</string>
     <string name="route_failed">Маршрут не построен</string>
     <string name="route_needs_login">Маршруты считает сервер — нужен вход</string>
+    <string name="route_out_of_coverage">Здесь маршруты пока не работают: регион не загружен на сервере</string>
+    <string name="locate_me">Где я</string>
     <string name="sync_now">Синхронизировать</string>
     <string name="sync_sign_in">Войти</string>
     <string name="social">Друзья</string>

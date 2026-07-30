@@ -42,6 +42,7 @@ import dev.fogmap.R
 import dev.fogmap.core.routing.RevealedLookup
 import dev.fogmap.core.routing.RoutePoint
 import dev.fogmap.core.routing.clipRoute
+import dev.fogmap.data.RouteResult
 import dev.fogmap.data.RoutingClient
 import dev.fogmap.data.api.SocialRepository
 import dev.fogmap.data.api.SyncRepository
@@ -52,6 +53,7 @@ import dev.fogmap.tracking.Tracking
 import kotlinx.coroutines.launch
 import org.maplibre.android.MapLibre
 import org.maplibre.android.camera.CameraPosition
+import org.maplibre.android.camera.CameraUpdateFactory
 import org.maplibre.android.geometry.LatLng
 import org.maplibre.android.maps.MapLibreMap
 import org.maplibre.android.maps.MapView
@@ -63,7 +65,11 @@ import org.maplibre.android.maps.Style
  */
 private const val STYLE_URI = "https://tiles.openfreemap.org/styles/liberty"
 
-private val INITIAL_TARGET = LatLng(55.7558, 37.6173)
+/**
+ * Запасная точка: показывается, только если система не знает, где пользователь, — свежее
+ * устройство или выключенная геолокация. При первом запуске карта уезжает к человеку.
+ */
+private val FALLBACK_TARGET = LatLng(55.7558, 37.6173)
 private const val INITIAL_ZOOM = 15.0
 
 /** Позиция тумана среди детей MapView: над GL-поверхностью, под логотипом и атрибуцией. */
@@ -92,7 +98,14 @@ fun MapScreen(
 
     val routeGeometry = remember { mutableStateOf<List<RoutePoint>>(emptyList()) }
     val destination = remember { mutableStateOf<RoutePoint?>(null) }
-    val routeFailed = remember { mutableStateOf(false) }
+    val routeProblem = remember { mutableStateOf<RouteResult?>(null) }
+    val mapRef = remember { mutableStateOf<MapLibreMap?>(null) }
+
+    fun centerOn(lat: Double, lon: Double) {
+        mapRef.value?.animateCamera(
+            CameraUpdateFactory.newLatLngZoom(LatLng(lat, lon), INITIAL_ZOOM),
+        )
+    }
 
     LaunchedEffect(store) { store.load() }
 
@@ -129,11 +142,21 @@ fun MapScreen(
                     )
                 }
 
+                mapRef.value = map
                 map.setStyle(Style.Builder().fromUri(STYLE_URI))
                 map.cameraPosition = CameraPosition.Builder()
-                    .target(INITIAL_TARGET)
+                    .target(FALLBACK_TARGET)
                     .zoom(INITIAL_ZOOM)
                     .build()
+
+                // Позиция приходит асинхронно, поэтому сначала ставим запасную точку, а потом
+                // переезжаем. Иначе карта висела бы пустой, пока система думает.
+                Tracking.currentLocation(context) { lat, lon ->
+                    map.cameraPosition = CameraPosition.Builder()
+                        .target(LatLng(lat, lon))
+                        .zoom(INITIAL_ZOOM)
+                        .build()
+                }
 
                 // Оверлей считает тайл прямоугольником на экране, поэтому поворот и наклон
                 // выключены — иначе туман разъедется с картой.
@@ -154,10 +177,18 @@ fun MapScreen(
                     val target = RoutePoint(point.latitude, point.longitude)
                     if (origin != null) {
                         scope.launch {
-                            val geometry = routingClient.route(origin, target)
-                            routeFailed.value = geometry == null
-                            routeGeometry.value = geometry.orEmpty()
-                            destination.value = if (geometry == null) null else target
+                            when (val result = routingClient.route(origin, target)) {
+                                is RouteResult.Success -> {
+                                    routeProblem.value = null
+                                    routeGeometry.value = result.points
+                                    destination.value = target
+                                }
+                                else -> {
+                                    routeProblem.value = result
+                                    routeGeometry.value = emptyList()
+                                    destination.value = null
+                                }
+                            }
                         }
                     }
                     true
@@ -174,8 +205,11 @@ fun MapScreen(
             text = when {
                 // Маршруты считает наш сервер, поэтому без входа их просто нет — и сказать об
                 // этом надо прямо, а не общим «не построен».
-                routeFailed.value && !authenticated -> stringResource(R.string.route_needs_login)
-                routeFailed.value -> stringResource(R.string.route_failed)
+                routeProblem.value != null && !authenticated ->
+                    stringResource(R.string.route_needs_login)
+                routeProblem.value is RouteResult.OutOfCoverage ->
+                    stringResource(R.string.route_out_of_coverage)
+                routeProblem.value != null -> stringResource(R.string.route_failed)
                 routeGeometry.value.isEmpty() -> stringResource(R.string.route_hint)
                 else -> null
             },
@@ -191,6 +225,22 @@ fun MapScreen(
             ) {
                 Text(stringResource(R.string.social))
             }
+        }
+
+        Button(
+            modifier = Modifier.align(Alignment.CenterEnd).padding(16.dp),
+            onClick = {
+                // Во время трекинга позиция свежее, чем последняя известная системе.
+                val fix = Tracking.lastFix.value
+                when {
+                    fix != null -> centerOn(fix.lat, fix.lon)
+                    hasLocationPermission(context) ->
+                        Tracking.currentLocation(context) { lat, lon -> centerOn(lat, lon) }
+                    else -> permissionLauncher.launch(requiredPermissions())
+                }
+            },
+        ) {
+            Text(stringResource(R.string.locate_me))
         }
 
         BottomBar(
