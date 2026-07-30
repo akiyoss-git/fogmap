@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: fogmap
+  datasource:
+    url: ${FOGMAP_DB_URL:jdbc:postgresql://localhost:5432/fogmap}
+    username: ${FOGMAP_DB_USER:fogmap}
+    password: ${FOGMAP_DB_PASSWORD:fogmap}
+  flyway:
+    enabled: true
+
+fogmap:
+  jwt:
+    # Пусто по умолчанию: ключей в репозитории нет (инвариант 6 в CLAUDE.md).
+    # Если не задан, при старте генерируется случайный — токены живут до перезапуска.
+    secret: ${FOGMAP_JWT_SECRET:}
+    access-ttl: PT15M
+    refresh-ttl: P30D
+  routing:
+    # Путь к OSM-экстракту региона. Пусто — маршруты отключены, /routes отвечает 503.
+    # Файл в репозиторий не кладётся: это десятки мегабайт бинарника.
+    osm-file: ${FOGMAP_OSM_FILE:}
+    graph-dir: ${FOGMAP_GRAPH_DIR:data/graph-cache}
+
+logging:
+  level:
+    org.springframework.jdbc.core: warn

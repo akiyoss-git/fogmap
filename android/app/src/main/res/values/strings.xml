@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">fogmap</string>
+    <string name="tracking_channel">Трекинг</string>
+    <string name="tracking_title">fogmap открывает карту</string>
+    <string name="tracking_text">Записывает пройденный путь</string>
+    <string name="tracking_start">Начать трекинг</string>
+    <string name="tracking_stop">Остановить трекинг</string>
+    <string name="tracking_permission_needed">Без доступа к геолокации трекинг не запустить</string>
+    <string name="route_hint">Долгое нажатие — маршрут до точки</string>
+    <string name="route_failed">Маршрут не построен</string>
+    <string name="route_needs_login">Маршруты считает сервер — нужен вход</string>
+    <string name="sync_now">Синхронизировать</string>
+    <string name="sync_sign_in">Войти</string>
+    <string name="social">Друзья</string>
+</resources>

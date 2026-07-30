@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<network-security-config>
+    <!--
+      Релизная политика: открытый HTTP запрещён везде без исключений.
+      Послабление для локального бэкенда живёт в отладочном варианте этого файла
+      (src/debug/res/xml/network_security_config.xml) и в релиз не попадает.
+    -->
+    <base-config cleartextTrafficPermitted="false" />
+</network-security-config>
