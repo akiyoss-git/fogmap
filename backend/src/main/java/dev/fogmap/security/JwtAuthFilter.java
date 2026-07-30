@@ -24,9 +24,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String PREFIX = "Bearer ";
 
     private final JwtService jwtService;
+    private final RevokedUsers revokedUsers;
 
-    public JwtAuthFilter(JwtService jwtService) {
+    public JwtAuthFilter(JwtService jwtService, RevokedUsers revokedUsers) {
         this.jwtService = jwtService;
+        this.revokedUsers = revokedUsers;
     }
 
     @Override
@@ -38,7 +40,8 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         String header = request.getHeader("Authorization");
         if (header != null && header.startsWith(PREFIX)) {
             Long userId = jwtService.parseUserId(header.substring(PREFIX.length()));
-            if (userId != null) {
+            // Подпись верна, но аккаунт удалён — токен ещё не истёк, а пускать по нему уже нельзя.
+            if (userId != null && !revokedUsers.isRevoked(userId)) {
                 SecurityContextHolder.getContext().setAuthentication(
                         new UsernamePasswordAuthenticationToken(userId, null, List.of()));
             }

@@ -29,6 +29,9 @@ dependencies {
     runtimeOnly("org.postgresql:postgresql")
 
     implementation("com.graphhopper:graphhopper-core:11.0")
+    // GraphHopper тянет commons-io 1.3.1 — библиотеку 2007 года, снятую с поддержки. В нашем
+    // сценарии она видит только локальный .pbf, но держать её на classpath незачем.
+    implementation("commons-io:commons-io:2.20.0")
 
     implementation("io.jsonwebtoken:jjwt-api:0.13.0")
     runtimeOnly("io.jsonwebtoken:jjwt-impl:0.13.0")

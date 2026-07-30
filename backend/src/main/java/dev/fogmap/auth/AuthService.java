@@ -2,6 +2,7 @@ package dev.fogmap.auth;
 
 import dev.fogmap.auth.AuthDtos.TokensResponse;
 import dev.fogmap.security.JwtService;
+import dev.fogmap.security.RevokedUsers;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -31,19 +32,35 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokens;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
+    private final RevokedUsers revokedUsers;
     private final Duration refreshTtl;
+
+    /**
+     * Хеш несуществующего пароля — чтобы сверка занимала время и когда пользователя нет.
+     *
+     * <p>Без него вход по несуществующему логину отвечал за 3 мс, а по существующему за 90: bcrypt
+     * считается только во втором случае. Одинаковый код ответа при такой разнице ничего не скрывает,
+     * логины перечисляются секундомером.
+     */
+    private final String dummyHash;
 
     public AuthService(
             UserRepository users,
             RefreshTokenRepository refreshTokens,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
+            RevokedUsers revokedUsers,
             @Value("${fogmap.jwt.refresh-ttl}") Duration refreshTtl) {
         this.users = users;
         this.refreshTokens = refreshTokens;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
+        this.revokedUsers = revokedUsers;
         this.refreshTtl = refreshTtl;
+
+        byte[] filler = new byte[32];
+        RANDOM.nextBytes(filler);
+        this.dummyHash = passwordEncoder.encode(HexFormat.of().formatHex(filler));
     }
 
     @Transactional
@@ -58,9 +75,12 @@ public class AuthService {
     @Transactional
     public TokensResponse login(String username, String password) {
         Optional<UserRepository.UserRow> found = users.findByUsername(username);
-        if (found.isEmpty() || !passwordEncoder.matches(password, found.get().passwordHash())) {
-            // Один и тот же ответ на «нет пользователя» и «неверный пароль»: иначе по коду
-            // ответа можно перебирать существующие логины.
+        // Сверка выполняется всегда, даже против заглушки: одинаков должен быть не только код
+        // ответа, но и время. Иначе перечисление логинов делается секундомером.
+        String hash = found.map(UserRepository.UserRow::passwordHash).orElse(dummyHash);
+        boolean matches = passwordEncoder.matches(password, hash);
+
+        if (found.isEmpty() || !matches) {
             throw new ResponseStatusException(HttpStatus.UNAUTHORIZED, "invalid credentials");
         }
         return issue(found.get().id());
@@ -101,6 +121,8 @@ public class AuthService {
         if (users.delete(userId) == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such user");
         }
+        // Refresh-токены унесло каскадом, но уже выданный access живёт своей жизнью ещё 15 минут.
+        revokedUsers.revoke(userId);
     }
 
     private TokensResponse issue(long userId) {

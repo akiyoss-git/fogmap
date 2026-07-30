@@ -151,6 +151,39 @@ class SecurityHardeningTest {
     }
 
     @Test
+    @DisplayName("после удаления аккаунта уже выданный access-токен не работает")
+    void accessTokenDiesWithAccount() {
+        User user = newUser();
+        String token = user.tokens().accessToken();
+
+        assertEquals(
+                HttpStatus.OK,
+                rest.exchange("/friends", HttpMethod.GET, new HttpEntity<>(bearer(token)), String.class)
+                        .getStatusCode());
+
+        rest.exchange("/auth/account", HttpMethod.DELETE, new HttpEntity<>(bearer(token)), Void.class);
+
+        // Токен подписан верно и не истёк, но аккаунта больше нет. Раньше он продолжал работать
+        // ещё четверть часа, а запись в маску валилась 500 из-за внешнего ключа.
+        assertEquals(
+                HttpStatus.UNAUTHORIZED,
+                rest.exchange("/friends", HttpMethod.GET, new HttpEntity<>(bearer(token)), String.class)
+                        .getStatusCode());
+
+        byte[] mask = new byte[TileMath.MASK_BYTES];
+        Arrays.fill(mask, (byte) 0xFF);
+        assertEquals(
+                HttpStatus.UNAUTHORIZED,
+                rest.exchange(
+                        "/fog/sync",
+                        HttpMethod.POST,
+                        new HttpEntity<>(
+                                new SyncRequest(null, List.of(new TileUpload(9100, 5122, mask, null))),
+                                bearer(token)),
+                        String.class).getStatusCode());
+    }
+
+    @Test
     @DisplayName("удаление аккаунта закрыто без токена")
     void deleteAccountRequiresAuth() {
         assertEquals(
