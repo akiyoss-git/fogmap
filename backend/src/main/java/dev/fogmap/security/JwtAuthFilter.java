@@ -24,11 +24,11 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String PREFIX = "Bearer ";
 
     private final JwtService jwtService;
-    private final RevokedUsers revokedUsers;
+    private final ActiveUsers activeUsers;
 
-    public JwtAuthFilter(JwtService jwtService, RevokedUsers revokedUsers) {
+    public JwtAuthFilter(JwtService jwtService, ActiveUsers activeUsers) {
         this.jwtService = jwtService;
-        this.revokedUsers = revokedUsers;
+        this.activeUsers = activeUsers;
     }
 
     @Override
@@ -41,7 +41,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         if (header != null && header.startsWith(PREFIX)) {
             Long userId = jwtService.parseUserId(header.substring(PREFIX.length()));
             // Подпись верна, но аккаунт удалён — токен ещё не истёк, а пускать по нему уже нельзя.
-            if (userId != null && !revokedUsers.isRevoked(userId)) {
+            if (userId != null && activeUsers.exists(userId)) {
                 SecurityContextHolder.getContext().setAuthentication(
                         new UsernamePasswordAuthenticationToken(userId, null, List.of()));
             }

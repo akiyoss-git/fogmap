@@ -1,20 +1,21 @@
 package dev.fogmap.security;
 
 import java.time.Duration;
-import java.util.Iterator;
-import java.util.Map;
-import java.util.concurrent.ConcurrentHashMap;
+import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
+import org.springframework.jdbc.core.simple.JdbcClient;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import org.springframework.web.server.ResponseStatusException;
 
 /**
  * Ограничитель попыток по ключу — защита от перебора пароля.
  *
- * <p>Счётчик в памяти процесса: при нескольких экземплярах сервера злоумышленник получит лимит на
- * каждый из них. Для одного инстанса этого достаточно, для горизонтального масштабирования
- * счётчик придётся вынести в общее хранилище.
+ * <p>Счётчик лежит в базе, а не в памяти процесса: при нескольких экземплярах сервера памятный
+ * счётчик даёт по отдельному лимиту на каждый, и перебор раскладывается по инстансам.
  *
  * <p>Ключ по адресу берётся из {@code getRemoteAddr()}. За обратным прокси там окажется адрес
  * прокси — при развёртывании нужно либо настроить `server.forward-headers-strategy`, либо
@@ -23,56 +24,71 @@ import org.springframework.web.server.ResponseStatusException;
 @Component
 public class RequestThrottle {
 
-    /** Больше стольких ключей не храним: иначе перебор по адресам сам станет утечкой памяти. */
-    private static final int MAX_TRACKED_KEYS = 100_000;
-
-    private final Map<String, Attempts> attempts = new ConcurrentHashMap<>();
+    private final JdbcClient jdbc;
     private final int maxFailures;
     private final Duration window;
 
     public RequestThrottle(
+            JdbcClient jdbc,
             @Value("${fogmap.throttle.max-failures:10}") int maxFailures,
             @Value("${fogmap.throttle.window:PT15M}") Duration window) {
+        this.jdbc = jdbc;
         this.maxFailures = maxFailures;
         this.window = window;
     }
 
     /** Бросает 429, если по ключу превышен лимит. */
     public void check(String key) {
-        Attempts current = attempts.get(key);
-        if (current != null && !current.expired(window) && current.count >= maxFailures) {
+        Integer attempts = jdbc.sql("""
+                        select attempts from login_attempts
+                        where key = :key and window_started_at >= :windowStart
+                        """)
+                .param("key", key)
+                .param("windowStart", windowStart())
+                .query(Integer.class)
+                .optional()
+                .orElse(0);
+
+        if (attempts >= maxFailures) {
             throw new ResponseStatusException(HttpStatus.TOO_MANY_REQUESTS, "too many attempts");
         }
     }
 
+    /**
+     * Одним запросом: если прошлое окно истекло, счётчик начинается заново, иначе растёт.
+     * Читать-потом-писать здесь нельзя — параллельные попытки затирали бы друг друга.
+     */
     public void recordFailure(String key) {
-        purgeIfCrowded();
-        attempts.compute(key, (ignored, existing) -> {
-            if (existing == null || existing.expired(window)) return new Attempts();
-            existing.count++;
-            return existing;
-        });
+        jdbc.sql("""
+                        insert into login_attempts (key, attempts, window_started_at)
+                        values (:key, 1, now())
+                        on conflict (key) do update set
+                            attempts = case
+                                when login_attempts.window_started_at < :windowStart then 1
+                                else login_attempts.attempts + 1 end,
+                            window_started_at = case
+                                when login_attempts.window_started_at < :windowStart then now()
+                                else login_attempts.window_started_at end
+                        """)
+                .param("key", key)
+                .param("windowStart", windowStart())
+                .update();
     }
 
     /** Успех обнуляет счётчик: подобравший пароль с первой попытки и так уже внутри. */
     public void reset(String key) {
-        attempts.remove(key);
+        jdbc.sql("delete from login_attempts where key = :key").param("key", key).update();
     }
 
-    private void purgeIfCrowded() {
-        if (attempts.size() < MAX_TRACKED_KEYS) return;
-        Iterator<Map.Entry<String, Attempts>> iterator = attempts.entrySet().iterator();
-        while (iterator.hasNext()) {
-            if (iterator.next().getValue().expired(window)) iterator.remove();
-        }
+    /** Иначе таблица копит по строке на каждый адрес, с которого когда-либо ошиблись. */
+    @Scheduled(fixedDelayString = "PT1H")
+    public void purgeExpired() {
+        jdbc.sql("delete from login_attempts where window_started_at < :windowStart")
+                .param("windowStart", windowStart())
+                .update();
     }
 
-    private static final class Attempts {
-        private int count = 1;
-        private final long startedAt = System.nanoTime();
-
-        boolean expired(Duration window) {
-            return System.nanoTime() - startedAt > window.toNanos();
-        }
+    private OffsetDateTime windowStart() {
+        return Instant.now().minus(window).atOffset(ZoneOffset.UTC);
     }
 }

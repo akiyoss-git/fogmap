@@ -2,7 +2,6 @@ package dev.fogmap.auth;
 
 import dev.fogmap.auth.AuthDtos.TokensResponse;
 import dev.fogmap.security.JwtService;
-import dev.fogmap.security.RevokedUsers;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -32,7 +31,6 @@ public class AuthService {
     private final RefreshTokenRepository refreshTokens;
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
-    private final RevokedUsers revokedUsers;
     private final Duration refreshTtl;
 
     /**
@@ -49,13 +47,11 @@ public class AuthService {
             RefreshTokenRepository refreshTokens,
             PasswordEncoder passwordEncoder,
             JwtService jwtService,
-            RevokedUsers revokedUsers,
             @Value("${fogmap.jwt.refresh-ttl}") Duration refreshTtl) {
         this.users = users;
         this.refreshTokens = refreshTokens;
         this.passwordEncoder = passwordEncoder;
         this.jwtService = jwtService;
-        this.revokedUsers = revokedUsers;
         this.refreshTtl = refreshTtl;
 
         byte[] filler = new byte[32];
@@ -121,8 +117,8 @@ public class AuthService {
         if (users.delete(userId) == 0) {
             throw new ResponseStatusException(HttpStatus.NOT_FOUND, "no such user");
         }
-        // Refresh-токены унесло каскадом, но уже выданный access живёт своей жизнью ещё 15 минут.
-        revokedUsers.revoke(userId);
+        // Refresh-токены унесло каскадом. Уже выданный access перестанет работать сам:
+        // фильтр проверяет, что пользователь ещё существует.
     }
 
     private TokensResponse issue(long userId) {
